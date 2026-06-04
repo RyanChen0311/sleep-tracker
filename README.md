@@ -2,7 +2,7 @@
 
 互動式睡眠模式視覺化工具，將正常作息與實際睡眠時間對比呈現在 SVG 時間軸上，並自動計算晚睡、晚起、睡眠時長等差異數據。
 
-**線上展示：** https://RyanChen0311.github.io/sleep-analysis-chart/
+**線上展示：** https://ryanchen0311.github.io/sleep-analysis-chart/
 
 ---
 
