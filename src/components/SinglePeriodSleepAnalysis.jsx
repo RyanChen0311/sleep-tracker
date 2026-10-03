@@ -3,10 +3,12 @@ import { Moon, Sun, Coffee, Calendar, ArrowRight } from 'lucide-react';
 import {
   timeToMinutes,
   formatDuration,
+  splitMinutes,
   sleepDuration,
   timeDiff,
   parseLocalDate,
   toLocalDateString,
+  suggestNextNight,
 } from '../utils/sleepTime';
 
 // 圖表配色：時間點圖示與控制面板一致（月亮、太陽、紅杯子、綠杯子）
@@ -24,41 +26,32 @@ const COLORS = {
 };
 
 // 圖表分層排版（相對於每一列的頂端），各層互不重疊：
-// 正常圖示+標籤 → 實際圖示+標籤 → 正常長條 → 實際長條 → 軸線 → 刻度數字
+// 正常圖示+時間 → 正常長條 → 實際長條 → 軸線 → 刻度數字 → 實際圖示+時間
 const LAYOUT = {
   normalLane: 10, // 圖示中心 y
-  actualLane: 30,
-  normalBarTop: 44,
-  actualBarTop: 60,
+  normalBarTop: 28,
+  actualBarTop: 44,
   barHeight: 12,
-  axis: 78,
-  majorTickEnd: 90,
-  minorTickEnd: 84,
-  hourText: 104,
-  rowHeight: 120,
+  axis: 62,
+  majorTickEnd: 74,
+  minorTickEnd: 68,
+  hourText: 86,
+  actualLane: 114,
+  rowHeight: 140, // 含與下一天之間的間距
 };
 const CHART_LEFT = 80;
 const CHART_RIGHT = 820;
 const ICON_SIZE = 14;
-// 輔助線：從圖示下方垂直畫到軸線，畫在最底層，長條與文字會蓋在上面
-const GuideLine = ({ cx, cy, color, axisY }) => (
-  <line x1={cx} y1={cy + ICON_SIZE / 2 + 2} x2={cx} y2={axisY} stroke={color} strokeWidth="1" strokeDasharray="2,3" opacity="0.6" />
+// 輔助線：從圖示垂直延伸，對準時間位置
+const GuideLine = ({ cx, y1, y2, color }) => (
+  <line x1={cx} y1={y1} x2={cx} y2={y2} stroke={color} strokeWidth="1" strokeDasharray="2,3" opacity="0.6" />
 );
 
 // 時間點：圖示中心在 (cx, cy)，時間標在圖示右邊
 const TimeMarker = ({ cx, cy, color, textColor, Icon, label }) => (
   <g>
     <Icon x={cx - ICON_SIZE / 2} y={cy - ICON_SIZE / 2} size={ICON_SIZE} color={color} strokeWidth={2.5} />
-    {/* 白色外框讓輔助線經過時不切斷文字 */}
-    <text
-      x={cx + ICON_SIZE / 2 + 4}
-      y={cy + 4}
-      fontSize="11"
-      fill={textColor}
-      stroke="white"
-      strokeWidth="3"
-      paintOrder="stroke"
-    >
+    <text x={cx + ICON_SIZE / 2 + 4} y={cy + 4} fontSize="11" fill={textColor}>
       {label}
     </text>
   </g>
@@ -112,7 +105,7 @@ const SinglePeriodSleepAnalysis = () => {
       marks.push(
         <g key={`${top}-${i}`}>
           <line x1={x} y1={axisY} x2={x} y2={top + LAYOUT.majorTickEnd} stroke="#6b7280" strokeWidth="1" />
-          <text x={x} y={top + LAYOUT.hourText} textAnchor="middle" fontSize="11" fill="#6b7280">
+          <text x={x} y={top + LAYOUT.hourText} textAnchor="middle" fontSize="11" fill="#6b7280" stroke="white" strokeWidth="3" paintOrder="stroke">
             {i.toString().padStart(2, '0')}
           </text>
         </g>
@@ -131,24 +124,30 @@ const SinglePeriodSleepAnalysis = () => {
   const timeX = (timeStr) => getXPosition(timeToHours(timeStr));
 
   // 一列 = 一天：入睡在第 1 天（長條畫到 24:00），起床在第 2 天（長條從 00:00 開始）
-  const renderDayRow = ({ top, dayLabel, dayShort, normal, actual }) => (
-    <g key={top}>
-      <text x="25" y={top + LAYOUT.normalBarTop + 12} fontSize="13" fontWeight="bold" fill="#374151">{dayLabel}</text>
-      <text x="25" y={top + LAYOUT.actualBarTop + 12} fontSize="11" fill="#6b7280">{dayShort}</text>
+  const renderDayRow = ({ top, dayLabel, dayShort, normal, actual }) => {
+    const iconHalf = ICON_SIZE / 2 + 2;
+    const normalBarTop = top + LAYOUT.normalBarTop;
+    return (
+      <g key={top}>
+        <text x="25" y={top + LAYOUT.axis - 4} fontSize="13" fontWeight="bold" fill="#374151">{dayLabel}</text>
+        <text x="25" y={top + LAYOUT.axis + 12} fontSize="11" fill="#6b7280">{dayShort}</text>
+        <text x="25" y={top + LAYOUT.axis + 26} fontSize="11" fill={actual.marker.textColor}>{actual.marker.label}</text>
 
-      <GuideLine cy={top + LAYOUT.normalLane} axisY={top + LAYOUT.axis} {...normal.marker} />
-      <GuideLine cy={top + LAYOUT.actualLane} axisY={top + LAYOUT.axis} {...actual.marker} />
+        <GuideLine cx={normal.marker.cx} y1={top + LAYOUT.normalLane + iconHalf} y2={normalBarTop} color={normal.marker.color} />
+        {/* 實際的輔助線從藍色長條底部畫到圖示；刻度數字有白框，經過時不會被切斷 */}
+        <GuideLine cx={actual.marker.cx} y1={top + LAYOUT.actualBarTop + LAYOUT.barHeight} y2={top + LAYOUT.actualLane - iconHalf} color={actual.marker.color} />
 
-      <rect x={normal.barStart} y={top + LAYOUT.normalBarTop} width={normal.barEnd - normal.barStart} height={LAYOUT.barHeight} fill={COLORS.normalBar} rx="2" />
-      <rect x={actual.barStart} y={top + LAYOUT.actualBarTop} width={actual.barEnd - actual.barStart} height={LAYOUT.barHeight} fill={COLORS.actualBar} rx="2" />
+        <rect x={normal.barStart} y={normalBarTop} width={normal.barEnd - normal.barStart} height={LAYOUT.barHeight} fill={COLORS.normalBar} rx="2" />
+        <rect x={actual.barStart} y={top + LAYOUT.actualBarTop} width={actual.barEnd - actual.barStart} height={LAYOUT.barHeight} fill={COLORS.actualBar} rx="2" />
 
-      <line x1={CHART_LEFT} y1={top + LAYOUT.axis} x2={CHART_RIGHT} y2={top + LAYOUT.axis} stroke="#374151" strokeWidth="2" />
-      {generateTimeMarks(top)}
+        <line x1={CHART_LEFT} y1={top + LAYOUT.axis} x2={CHART_RIGHT} y2={top + LAYOUT.axis} stroke="#374151" strokeWidth="2" />
+        {generateTimeMarks(top)}
 
-      <TimeMarker cy={top + LAYOUT.normalLane} {...normal.marker} />
-      <TimeMarker cy={top + LAYOUT.actualLane} {...actual.marker} />
-    </g>
-  );
+        <TimeMarker cy={top + LAYOUT.normalLane} {...normal.marker} />
+        <TimeMarker cy={top + LAYOUT.actualLane} {...actual.marker} />
+      </g>
+    );
+  };
 
   const getDateInfo = () => {
     if (timePeriod === 'yesterday-today') {
@@ -181,6 +180,21 @@ const SinglePeriodSleepAnalysis = () => {
       ? { label: lateLabel, color: lateColor, text: formatDuration(diff) }
       : { label: earlyLabel, color: earlyColor, text: formatDuration(diff) };
   };
+  // 下一晚建議：每天最多往正常作息調整 1 小時
+  const suggestion = suggestNextNight(normalSleepTime, normalWakeTime, actualSleepTime, actualWakeTime);
+  const describeShift = (minutes) => {
+    if (minutes === 0) return '不變';
+    const { hours, minutes: mins } = splitMinutes(minutes);
+    const amount = [hours && `${hours}小時`, mins && `${mins}分鐘`].filter(Boolean).join('');
+    return `${minutes > 0 ? '延後' : '提早'}${amount}`;
+  };
+  const suggestionText = (() => {
+    if (suggestion.alreadyNormal) return `維持 ${normalSleepTime} 睡、${normalWakeTime} 起`;
+    const plan = `下一晚（${dateInfo.secondDay.short}）${suggestion.sleep} 睡、${suggestion.wake} 起`;
+    if (suggestion.reachesNormal) return `${plan}，即可回到正常作息`;
+    return `${plan}（睡覺${describeShift(suggestion.sleepShift)}、起床${describeShift(suggestion.wakeShift)}，逐步回到正常作息）`;
+  })();
+
   const sleepCard = diffCard(sleepDiff, '晚睡時間', '早睡時間', 'red', 'purple');
   const wakeCard = diffCard(wakeDiff, '晚起時間', '早起時間', 'orange', 'teal');
 
@@ -287,7 +301,7 @@ const SinglePeriodSleepAnalysis = () => {
           </h3>
         </div>
 
-        <svg width="900" height={LAYOUT.rowHeight * 2 + 10} className="mx-auto">
+        <svg width="900" height={10 + LAYOUT.rowHeight + LAYOUT.actualLane + 12} className="mx-auto">
           {renderDayRow({
             top: 10,
             dayLabel: dateInfo.firstDayLabel,
@@ -303,6 +317,8 @@ const SinglePeriodSleepAnalysis = () => {
               marker: { cx: timeX(actualSleepTime), color: COLORS.actualSleep, textColor: COLORS.actualSleepText, Icon: Coffee, label: actualSleepTime },
             },
           })}
+          {/* 兩天之間的分隔線 */}
+          <line x1="20" y1={10 + LAYOUT.rowHeight - 8} x2="860" y2={10 + LAYOUT.rowHeight - 8} stroke="#e5e7eb" strokeWidth="1" />
           {renderDayRow({
             top: 10 + LAYOUT.rowHeight,
             dayLabel: dateInfo.secondDayLabel,
@@ -371,14 +387,13 @@ const SinglePeriodSleepAnalysis = () => {
         </div>
         <div className="mt-4 text-sm text-gray-600">
           <p>
-            <span className="font-medium">睡眠時段:</span>{' '}
-            {dateInfo.firstDay.short} {actualSleepTime} → {dateInfo.secondDay.short} {actualWakeTime}
-          </p>
-          <p>
             <span className="font-medium">睡眠差異:</span>{' '}
             {durationDiff === 0
               ? '與正常相同'
               : `${durationDiff > 0 ? '多睡' : '少睡'}${formatDuration(durationDiff)}`}
+          </p>
+          <p>
+            <span className="font-medium">建議:</span> {suggestionText}
           </p>
         </div>
       </div>

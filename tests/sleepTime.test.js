@@ -58,3 +58,30 @@ test('日期以本地時間解析', () => {
   assert.deepEqual([d.getFullYear(), d.getMonth(), d.getDate()], [2026, 9, 3]);
   assert.equal(toLocalDateString(new Date(2026, 9, 3, 2, 0)), '2026-10-03');
 });
+
+test('下一晚建議：每天最多調 1 小時，往正常作息靠近', async () => {
+  const { suggestNextNight, clockDiff } = await import('../src/utils/sleepTime.js');
+  const n = (s, w) => suggestNextNight('23:00', '07:00', s, w);
+
+  assert.deepEqual(
+    (({ sleep, wake, reachesNormal, alreadyNormal }) => ({ sleep, wake, reachesNormal, alreadyNormal }))(n('23:00', '07:00')),
+    { sleep: '23:00', wake: '07:00', reachesNormal: true, alreadyNormal: true },
+  );
+  assert.equal(n('23:30', '07:30').reachesNormal, true);
+  assert.deepEqual([n('20:00', '04:00').sleep, n('20:00', '04:00').wake], ['21:00', '05:00']);
+  // 過了午夜才睡：01:00 視為晚 2 小時，建議提早 1 小時
+  assert.equal(n('01:00', '09:00').sleep, '00:00');
+  assert.equal(n('01:00', '09:00').sleepShift, -60);
+  assert.equal(n('03:00', '11:00').wake, '10:00');
+
+  // 576 種整點組合：建議一定更接近正常，且移動不超過 1 小時
+  for (let s = 0; s < 24; s++) {
+    for (let w = 0; w < 24; w++) {
+      const S = hh(s), W = hh(w);
+      const r = n(S, W);
+      assert.ok(Math.abs(r.sleepShift) <= 60 && Math.abs(r.wakeShift) <= 60, `${S}->${W}`);
+      assert.ok(Math.abs(clockDiff(r.sleep, '23:00')) <= Math.abs(clockDiff(S, '23:00')));
+      assert.ok(Math.abs(clockDiff(r.wake, '07:00')) <= Math.abs(clockDiff(W, '07:00')));
+    }
+  }
+});

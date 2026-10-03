@@ -34,3 +34,40 @@ export const parseLocalDate = (dateStr) => {
 
 export const toLocalDateString = (date) =>
   [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+
+// ---- 下一晚建議（調時差）----
+// 建議以「時鐘上最近的方向」計算差距（±12 小時），
+// 讓過了午夜才睡（例如 01:00）被視為晚睡，而不是早睡 22 小時。
+
+export const SHIFT_STEP_MINUTES = 60; // 每天最多調整 1 小時
+
+export const minutesToTime = (totalMinutes) => {
+  const m = ((totalMinutes % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+};
+
+// 從 fromTime 到 toTime 的最短時鐘差，範圍 [-720, 720)；正值 = toTime 較晚
+export const clockDiff = (fromTime, toTime) => {
+  const d = timeToMinutes(toTime) - timeToMinutes(fromTime);
+  return ((((d + 720) % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY) - 720;
+};
+
+// 往目標時間移動，最多 step 分鐘；差距在 step 以內就直接到目標
+export const stepToward = (actualTime, targetTime, step = SHIFT_STEP_MINUTES) => {
+  const d = clockDiff(actualTime, targetTime);
+  if (Math.abs(d) <= step) return targetTime;
+  return minutesToTime(timeToMinutes(actualTime) + Math.sign(d) * step);
+};
+
+export const suggestNextNight = (normalSleep, normalWake, actualSleep, actualWake) => {
+  const sleep = stepToward(actualSleep, normalSleep);
+  const wake = stepToward(actualWake, normalWake);
+  return {
+    sleep,
+    wake,
+    sleepShift: clockDiff(actualSleep, sleep), // 正值 = 延後，負值 = 提早
+    wakeShift: clockDiff(actualWake, wake),
+    alreadyNormal: actualSleep === normalSleep && actualWake === normalWake,
+    reachesNormal: sleep === normalSleep && wake === normalWake,
+  };
+};
