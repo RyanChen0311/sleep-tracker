@@ -261,18 +261,6 @@ const SinglePeriodSleepAnalysis = () => {
           <text x={clampLabelX(getXPosition(timeToHours(actualWakeTime)))} y="200" textAnchor="middle" fontSize="11" fill="#059669">
             實際起床 {actualWakeTime}
           </text>
-
-          {/* 連接線 */}
-          <line
-            x1={getXPosition(timeToHours(actualSleepTime))}
-            y1="70"
-            x2={getXPosition(timeToHours(actualWakeTime))}
-            y2="230"
-            stroke="#10b981"
-            strokeWidth="2"
-            strokeDasharray="5,5"
-            opacity="0.7"
-          />
         </svg>
 
         <div className="flex flex-wrap justify-center gap-4 mt-6 text-xs">
