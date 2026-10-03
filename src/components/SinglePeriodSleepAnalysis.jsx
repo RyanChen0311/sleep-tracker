@@ -1,21 +1,39 @@
 import React, { useState } from 'react';
-import { Clock, Moon, Sun, Coffee, Calendar, ArrowRight } from 'lucide-react';
+import { Moon, Sun, Coffee, Calendar, ArrowRight } from 'lucide-react';
+import {
+  timeToMinutes,
+  formatDuration,
+  sleepDuration,
+  timeDiff,
+  parseLocalDate,
+  toLocalDateString,
+} from '../utils/sleepTime';
+
+const CARD_STYLES = {
+  red: { bg: 'bg-red-50', title: 'text-red-700', text: 'text-red-600' },
+  purple: { bg: 'bg-purple-50', title: 'text-purple-700', text: 'text-purple-600' },
+  orange: { bg: 'bg-orange-50', title: 'text-orange-700', text: 'text-orange-600' },
+  teal: { bg: 'bg-teal-50', title: 'text-teal-700', text: 'text-teal-600' },
+  gray: { bg: 'bg-gray-50', title: 'text-gray-700', text: 'text-gray-600' },
+};
 
 const SinglePeriodSleepAnalysis = () => {
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(toLocalDateString(new Date()));
   const [timePeriod, setTimePeriod] = useState('today-tomorrow');
   const [normalSleepTime, setNormalSleepTime] = useState('23:00');
   const [normalWakeTime, setNormalWakeTime] = useState('07:00');
-  const [actualSleepTime, setActualSleepTime] = useState('02:00');
-  const [actualWakeTime, setActualWakeTime] = useState('08:30');
+  const [actualSleepTime, setActualSleepTime] = useState('23:30');
+  const [actualWakeTime, setActualWakeTime] = useState('07:30');
 
-  const timeToHours = (timeStr) => {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    return hours + minutes / 60;
+  // 清空欄位會得到空字串，忽略它以免計算出 NaN
+  const keepIfFilled = (setter) => (e) => {
+    if (e.target.value) setter(e.target.value);
   };
 
+  const timeToHours = (timeStr) => timeToMinutes(timeStr) / 60;
+
   const formatDate = (dateStr, offset = 0) => {
-    const date = new Date(dateStr);
+    const date = parseLocalDate(dateStr);
     date.setDate(date.getDate() + offset);
     return {
       full: date.toLocaleDateString('zh-TW', {
@@ -29,28 +47,6 @@ const SinglePeriodSleepAnalysis = () => {
         day: '2-digit',
       }),
     };
-  };
-
-  // Returns signed difference: positive = late, negative = early.
-  // Normalised to [-12, +12] so cross-midnight comparisons work correctly.
-  const calculateTimeDiff = (normalTime, actualTime) => {
-    let diff = timeToHours(actualTime) - timeToHours(normalTime);
-    if (diff > 12) diff -= 24;
-    if (diff < -12) diff += 24;
-    const abs = Math.abs(diff);
-    const hours = Math.floor(abs);
-    const minutes = Math.round((abs - hours) * 60);
-    return { hours, minutes, total: diff, isLate: diff >= 0 };
-  };
-
-  const calculateActualSleepDuration = (sleepTime, wakeTime) => {
-    let sleepHours = timeToHours(sleepTime);
-    let wakeHours = timeToHours(wakeTime);
-    let duration = wakeHours - sleepHours;
-    if (duration <= 0) duration += 24;
-    const hours = Math.floor(duration);
-    const minutes = Math.round((duration - hours) * 60);
-    return { hours, minutes, total: duration };
   };
 
   const generateTimeMarks = (dayOffset = 0) => {
@@ -97,10 +93,21 @@ const SinglePeriodSleepAnalysis = () => {
   };
 
   const dateInfo = getDateInfo();
-  const lateNightSleep = calculateTimeDiff(normalSleepTime, actualSleepTime);
-  const lateWakeUp = calculateTimeDiff(normalWakeTime, actualWakeTime);
-  const actualSleepDuration = calculateActualSleepDuration(actualSleepTime, actualWakeTime);
-  const normalSleepDuration = calculateActualSleepDuration(normalSleepTime, normalWakeTime);
+  const sleepDiff = timeDiff(normalSleepTime, actualSleepTime);
+  const wakeDiff = timeDiff(normalWakeTime, actualWakeTime);
+  const actualSleepDuration = sleepDuration(actualSleepTime, actualWakeTime);
+  const normalSleepDuration = sleepDuration(normalSleepTime, normalWakeTime);
+  const durationDiff = actualSleepDuration - normalSleepDuration;
+
+  // 差值為 0 時顯示「準時」，不歸類為晚或早
+  const diffCard = (diff, lateLabel, earlyLabel, lateColor, earlyColor) => {
+    if (diff === 0) return { label: '準時', color: 'gray', text: '與正常相同' };
+    return diff > 0
+      ? { label: lateLabel, color: lateColor, text: formatDuration(diff) }
+      : { label: earlyLabel, color: earlyColor, text: formatDuration(diff) };
+  };
+  const sleepCard = diffCard(sleepDiff, '晚睡時間', '早睡時間', 'red', 'purple');
+  const wakeCard = diffCard(wakeDiff, '晚起時間', '早起時間', 'orange', 'teal');
 
   return (
     <div className="max-w-6xl mx-auto p-6 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl">
@@ -138,7 +145,7 @@ const SinglePeriodSleepAnalysis = () => {
             <input
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={keepIfFilled(setSelectedDate)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md"
             />
           </div>
@@ -152,7 +159,7 @@ const SinglePeriodSleepAnalysis = () => {
                 <input
                   type="time"
                   value={normalSleepTime}
-                  onChange={(e) => setNormalSleepTime(e.target.value)}
+                  onChange={keepIfFilled(setNormalSleepTime)}
                   className="px-2 py-1 border border-gray-300 rounded text-sm flex-1"
                 />
               </div>
@@ -162,7 +169,7 @@ const SinglePeriodSleepAnalysis = () => {
                 <input
                   type="time"
                   value={normalWakeTime}
-                  onChange={(e) => setNormalWakeTime(e.target.value)}
+                  onChange={keepIfFilled(setNormalWakeTime)}
                   className="px-2 py-1 border border-gray-300 rounded text-sm flex-1"
                 />
               </div>
@@ -178,7 +185,7 @@ const SinglePeriodSleepAnalysis = () => {
                 <input
                   type="time"
                   value={actualSleepTime}
-                  onChange={(e) => setActualSleepTime(e.target.value)}
+                  onChange={keepIfFilled(setActualSleepTime)}
                   className="px-2 py-1 border border-gray-300 rounded text-sm flex-1"
                 />
               </div>
@@ -188,7 +195,7 @@ const SinglePeriodSleepAnalysis = () => {
                 <input
                   type="time"
                   value={actualWakeTime}
-                  onChange={(e) => setActualWakeTime(e.target.value)}
+                  onChange={keepIfFilled(setActualWakeTime)}
                   className="px-2 py-1 border border-gray-300 rounded text-sm flex-1"
                 />
               </div>
@@ -278,15 +285,19 @@ const SinglePeriodSleepAnalysis = () => {
             <span>實際睡眠時間</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-indigo-600 rounded-full"></div>
-            <span>正常時間點</span>
+            <div className="w-3 h-3 bg-indigo-500 rounded-full"></div>
+            <span>正常睡覺</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-amber-500 rounded-full"></div>
+            <span>正常起床</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
             <span>實際睡覺</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-green-600 rounded-full"></div>
+            <div className="w-3 h-3 bg-emerald-500 rounded-full"></div>
             <span>實際起床</span>
           </div>
         </div>
@@ -298,43 +309,31 @@ const SinglePeriodSleepAnalysis = () => {
           {dateInfo.firstDayLabel}→{dateInfo.secondDayLabel} 睡眠分析
         </h3>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-          <div className={`p-3 rounded ${lateNightSleep.isLate ? 'bg-red-50' : 'bg-purple-50'}`}>
-            <p className={`font-medium ${lateNightSleep.isLate ? 'text-red-700' : 'text-purple-700'}`}>
-              {lateNightSleep.isLate ? '晚睡時間' : '早睡時間'}
-            </p>
-            <p className={lateNightSleep.isLate ? 'text-red-600' : 'text-purple-600'}>
-              {lateNightSleep.hours}小時{lateNightSleep.minutes}分鐘
-            </p>
-          </div>
-          <div className={`p-3 rounded ${lateWakeUp.isLate ? 'bg-orange-50' : 'bg-teal-50'}`}>
-            <p className={`font-medium ${lateWakeUp.isLate ? 'text-orange-700' : 'text-teal-700'}`}>
-              {lateWakeUp.isLate ? '晚起時間' : '早起時間'}
-            </p>
-            <p className={lateWakeUp.isLate ? 'text-orange-600' : 'text-teal-600'}>
-              {lateWakeUp.hours}小時{lateWakeUp.minutes}分鐘
-            </p>
-          </div>
+          {[sleepCard, wakeCard].map((card) => (
+            <div key={card.label + card.color} className={`p-3 rounded ${CARD_STYLES[card.color].bg}`}>
+              <p className={`font-medium ${CARD_STYLES[card.color].title}`}>{card.label}</p>
+              <p className={CARD_STYLES[card.color].text}>{card.text}</p>
+            </div>
+          ))}
           <div className="bg-green-50 p-3 rounded">
             <p className="font-medium text-green-700">實際睡眠</p>
-            <p className="text-green-600">{actualSleepDuration.hours}小時{actualSleepDuration.minutes}分鐘</p>
+            <p className="text-green-600">{formatDuration(actualSleepDuration)}</p>
           </div>
           <div className="bg-blue-50 p-3 rounded">
             <p className="font-medium text-blue-700">正常睡眠</p>
-            <p className="text-blue-600">{normalSleepDuration.hours}小時{normalSleepDuration.minutes}分鐘</p>
+            <p className="text-blue-600">{formatDuration(normalSleepDuration)}</p>
           </div>
         </div>
         <div className="mt-4 text-sm text-gray-600">
-          <p><span className="font-medium">睡眠時段:</span> {actualSleepTime} → {actualWakeTime}</p>
+          <p>
+            <span className="font-medium">睡眠時段:</span>{' '}
+            {dateInfo.firstDay.short} {actualSleepTime} → {dateInfo.secondDay.short} {actualWakeTime}
+          </p>
           <p>
             <span className="font-medium">睡眠差異:</span>{' '}
-            {(() => {
-              const diff = actualSleepDuration.total - normalSleepDuration.total;
-              const hours = Math.floor(Math.abs(diff));
-              const minutes = Math.round((Math.abs(diff) - hours) * 60);
-              return diff >= 0
-                ? `多睡${hours}小時${minutes}分鐘`
-                : `少睡${hours}小時${minutes}分鐘`;
-            })()}
+            {durationDiff === 0
+              ? '與正常相同'
+              : `${durationDiff > 0 ? '多睡' : '少睡'}${formatDuration(durationDiff)}`}
           </p>
         </div>
       </div>

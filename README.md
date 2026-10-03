@@ -12,6 +12,7 @@
 - SVG 雙軸時間軸圖表，直觀呈現跨午夜的睡眠區間
 - 支援「昨天→今天」和「今天→明天」兩種時間段模式
 - 可選擇基準日期
+- 時間規則：入睡時間固定在第 1 天（上列），起床時間固定在第 2 天（下列），睡眠時長範圍為 0–48 小時
 - 自動計算：
   - 晚睡 / 早睡時間
   - 晚起 / 早起時間
@@ -40,6 +41,11 @@ npm run dev
 
 開啟 http://localhost:5173 預覽。
 
+```bash
+# 執行時間計算測試（涵蓋 576 種整點組合）
+npm test
+```
+
 ## 建置與部署
 
 ```bash
@@ -58,6 +64,8 @@ npm run preview
 src/
 ├── components/
 │   └── SinglePeriodSleepAnalysis.jsx   # 主要分析圖表元件
+├── utils/
+│   └── sleepTime.js                    # 時間計算（整數分鐘）
 ├── App.jsx
 ├── main.jsx
 └── index.css
