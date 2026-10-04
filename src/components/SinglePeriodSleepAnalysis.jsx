@@ -9,6 +9,9 @@ import {
   parseLocalDate,
   toLocalDateString,
   suggestNextNight,
+  isValidSameDay,
+  sameDaySleepDuration,
+  sameDaySleepDiff,
 } from '../utils/sleepTime';
 
 // 圖表配色：時間點圖示與控制面板一致（月亮、太陽、紅杯子、綠杯子）
@@ -37,6 +40,7 @@ const LAYOUT = {
   minorTickEnd: 68,
   hourText: 86,
   actualLane: 114,
+  actualLane2: 138, // 今天→今天：實際起床與實際睡覺在同一列，起床放在更下一層
   rowHeight: 140, // 含與下一天之間的間距
 };
 const CHART_LEFT = 80;
@@ -51,7 +55,8 @@ const GuideLine = ({ cx, y1, y2, color }) => (
 const TimeMarker = ({ cx, cy, color, textColor, Icon, label }) => (
   <g>
     <Icon x={cx - ICON_SIZE / 2} y={cy - ICON_SIZE / 2} size={ICON_SIZE} color={color} strokeWidth={2.5} />
-    <text x={cx + ICON_SIZE / 2 + 4} y={cy + 4} fontSize="11" fill={textColor}>
+    {/* 白框：今天→今天模式下，起床的輔助線可能經過睡覺的時間文字 */}
+    <text x={cx + ICON_SIZE / 2 + 4} y={cy + 4} fontSize="11" fill={textColor} stroke="white" strokeWidth="3" paintOrder="stroke">
       {label}
     </text>
   </g>
@@ -123,39 +128,64 @@ const SinglePeriodSleepAnalysis = () => {
   const getXPosition = (hours) => CHART_LEFT + (hours * (CHART_RIGHT - CHART_LEFT)) / 24;
   const timeX = (timeStr) => getXPosition(timeToHours(timeStr));
 
-  // 一列 = 一天：入睡在第 1 天（長條畫到 24:00），起床在第 2 天（長條從 00:00 開始）
-  const renderDayRow = ({ top, dayLabel, dayShort, normal, actual }) => {
+  // 一列 = 一天。actual 可為 null（該列沒有實際睡眠，或時間設定有誤）；
+  // actual.markers 可有多個，各自指定所在的層（lane）
+  const renderDayRow = ({ top, dayLabel, dayShort, normal, actual, sideTimes = [], notice }) => {
     const iconHalf = ICON_SIZE / 2 + 2;
     const normalBarTop = top + LAYOUT.normalBarTop;
     return (
       <g key={top}>
         <text x="25" y={top + LAYOUT.axis - 4} fontSize="13" fontWeight="bold" fill="#374151">{dayLabel}</text>
         <text x="25" y={top + LAYOUT.axis + 12} fontSize="11" fill="#6b7280">{dayShort}</text>
-        <text x="25" y={top + LAYOUT.axis + 26} fontSize="11" fill={actual.marker.textColor}>{actual.marker.label}</text>
+        {sideTimes.map((t, i) => (
+          <text key={t.label + i} x="25" y={top + LAYOUT.axis + 26 + i * 14} fontSize="11" fill={t.color}>{t.label}</text>
+        ))}
 
         <GuideLine cx={normal.marker.cx} y1={top + LAYOUT.normalLane + iconHalf} y2={normalBarTop} color={normal.marker.color} />
         {/* 實際的輔助線從藍色長條底部畫到圖示；刻度數字有白框，經過時不會被切斷 */}
-        <GuideLine cx={actual.marker.cx} y1={top + LAYOUT.actualBarTop + LAYOUT.barHeight} y2={top + LAYOUT.actualLane - iconHalf} color={actual.marker.color} />
+        {actual?.markers.map((m) => (
+          <GuideLine key={m.label + m.lane} cx={m.cx} y1={top + LAYOUT.actualBarTop + LAYOUT.barHeight} y2={top + m.lane - iconHalf} color={m.color} />
+        ))}
 
         <rect x={normal.barStart} y={normalBarTop} width={normal.barEnd - normal.barStart} height={LAYOUT.barHeight} fill={COLORS.normalBar} rx="2" />
-        <rect x={actual.barStart} y={top + LAYOUT.actualBarTop} width={actual.barEnd - actual.barStart} height={LAYOUT.barHeight} fill={COLORS.actualBar} rx="2" />
+        {actual && (
+          <rect x={actual.barStart} y={top + LAYOUT.actualBarTop} width={actual.barEnd - actual.barStart} height={LAYOUT.barHeight} fill={COLORS.actualBar} rx="2" />
+        )}
 
         <line x1={CHART_LEFT} y1={top + LAYOUT.axis} x2={CHART_RIGHT} y2={top + LAYOUT.axis} stroke="#374151" strokeWidth="2" />
         {generateTimeMarks(top)}
 
         <TimeMarker cy={top + LAYOUT.normalLane} {...normal.marker} />
-        <TimeMarker cy={top + LAYOUT.actualLane} {...actual.marker} />
+        {actual?.markers.map((m) => (
+          <TimeMarker key={m.label + m.lane} cy={top + m.lane} {...m} />
+        ))}
+        {notice && (
+          <text x={(CHART_LEFT + CHART_RIGHT) / 2} y={top + LAYOUT.actualLane + 4} textAnchor="middle" fontSize="12" fill="#6b7280">
+            {notice}
+          </text>
+        )}
       </g>
     );
   };
 
   const getDateInfo = () => {
+    // 今天→今天：正常作息仍從昨天入睡，所以圖表仍顯示昨天、今天兩列
+    if (timePeriod === 'today-today') {
+      return {
+        firstDay: formatDate(selectedDate, -1),
+        secondDay: formatDate(selectedDate, 0),
+        firstDayLabel: '昨天',
+        secondDayLabel: '今天',
+        periodLabel: '今天→今天',
+      };
+    }
     if (timePeriod === 'yesterday-today') {
       return {
         firstDay: formatDate(selectedDate, -1),
         secondDay: formatDate(selectedDate, 0),
         firstDayLabel: '昨天',
         secondDayLabel: '今天',
+        periodLabel: '昨天→今天',
       };
     }
     return {
@@ -163,13 +193,21 @@ const SinglePeriodSleepAnalysis = () => {
       secondDay: formatDate(selectedDate, 1),
       firstDayLabel: '今天',
       secondDayLabel: '明天',
+      periodLabel: '今天→明天',
     };
   };
 
   const dateInfo = getDateInfo();
-  const sleepDiff = timeDiff(normalSleepTime, actualSleepTime);
+  const isSameDay = timePeriod === 'today-today';
+  // 今天→今天：起床必須晚於入睡，否則提醒並不計算實際睡眠
+  const actualInvalid = isSameDay && !isValidSameDay(actualSleepTime, actualWakeTime);
+  const sleepDiff = isSameDay
+    ? sameDaySleepDiff(normalSleepTime, actualSleepTime)
+    : timeDiff(normalSleepTime, actualSleepTime);
   const wakeDiff = timeDiff(normalWakeTime, actualWakeTime);
-  const actualSleepDuration = sleepDuration(actualSleepTime, actualWakeTime);
+  const actualSleepDuration = isSameDay
+    ? sameDaySleepDuration(actualSleepTime, actualWakeTime)
+    : sleepDuration(actualSleepTime, actualWakeTime);
   const normalSleepDuration = sleepDuration(normalSleepTime, normalWakeTime);
   const durationDiff = actualSleepDuration - normalSleepDuration;
 
@@ -195,8 +233,39 @@ const SinglePeriodSleepAnalysis = () => {
     return `${plan}（睡覺${describeShift(suggestion.sleepShift)}、起床${describeShift(suggestion.wakeShift)}，逐步回到正常作息）`;
   })();
 
-  const sleepCard = diffCard(sleepDiff, '晚睡時間', '早睡時間', 'red', 'purple');
-  const wakeCard = diffCard(wakeDiff, '晚起時間', '早起時間', 'orange', 'teal');
+  const invalidCard = (label) => ({ label, color: 'gray', text: '—' });
+  const sleepCard = actualInvalid ? invalidCard('晚睡時間') : diffCard(sleepDiff, '晚睡時間', '早睡時間', 'red', 'purple');
+  const wakeCard = actualInvalid ? invalidCard('晚起時間') : diffCard(wakeDiff, '晚起時間', '早起時間', 'orange', 'teal');
+
+  const actualSleepMarker = { cx: timeX(actualSleepTime), color: COLORS.actualSleep, textColor: COLORS.actualSleepText, Icon: Coffee, label: actualSleepTime, lane: LAYOUT.actualLane };
+  const actualWakeMarker = { cx: timeX(actualWakeTime), color: COLORS.actualWake, textColor: COLORS.actualWakeText, Icon: Coffee, label: actualWakeTime, lane: LAYOUT.actualLane };
+  const sleepSideTime = { label: actualSleepTime, color: COLORS.actualSleepText };
+  const wakeSideTime = { label: actualWakeTime, color: COLORS.actualWakeText };
+
+  // 各模式下，實際睡眠在兩列中的畫法
+  const actualRows = (() => {
+    if (actualInvalid) {
+      return { first: { actual: null }, second: { actual: null, notice: '實際時間設定有誤，請修正起床時間' } };
+    }
+    if (isSameDay) {
+      return {
+        first: { actual: null },
+        second: {
+          actual: {
+            barStart: timeX(actualSleepTime),
+            barEnd: timeX(actualWakeTime),
+            markers: [actualSleepMarker, { ...actualWakeMarker, lane: LAYOUT.actualLane2 }],
+          },
+          sideTimes: [sleepSideTime, wakeSideTime],
+        },
+      };
+    }
+    return {
+      first: { actual: { barStart: timeX(actualSleepTime), barEnd: CHART_RIGHT, markers: [actualSleepMarker] }, sideTimes: [sleepSideTime] },
+      second: { actual: { barStart: CHART_LEFT, barEnd: timeX(actualWakeTime), markers: [actualWakeMarker] }, sideTimes: [wakeSideTime] },
+    };
+  })();
+  const lastActualLane = isSameDay && !actualInvalid ? LAYOUT.actualLane2 : LAYOUT.actualLane;
 
   return (
     <div className="max-w-6xl mx-auto p-6 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl">
@@ -223,6 +292,7 @@ const SinglePeriodSleepAnalysis = () => {
             >
               <option value="yesterday-today">昨天→今天</option>
               <option value="today-tomorrow">今天→明天</option>
+              <option value="today-today">今天→今天</option>
             </select>
           </div>
 
@@ -285,9 +355,12 @@ const SinglePeriodSleepAnalysis = () => {
                   type="time"
                   value={actualWakeTime}
                   onChange={keepIfFilled(setActualWakeTime)}
-                  className="px-2 py-1 border border-gray-300 rounded text-sm flex-1"
+                  className={`px-2 py-1 border rounded text-sm flex-1 ${actualInvalid ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300'}`}
                 />
               </div>
+              {actualInvalid && (
+                <p className="text-xs text-red-600">⚠ 起床時間不可以早於睡覺時間</p>
+              )}
             </div>
           </div>
         </div>
@@ -298,10 +371,11 @@ const SinglePeriodSleepAnalysis = () => {
         <div className="text-center mb-4">
           <h3 className="text-lg font-semibold text-gray-800">
             {dateInfo.firstDayLabel} ({dateInfo.firstDay.short}) → {dateInfo.secondDayLabel} ({dateInfo.secondDay.short})
+            {isSameDay && '，凌晨入睡'}
           </h3>
         </div>
 
-        <svg width="900" height={10 + LAYOUT.rowHeight + LAYOUT.actualLane + 12} className="mx-auto">
+        <svg width="900" height={10 + LAYOUT.rowHeight + lastActualLane + 12} className="mx-auto">
           {renderDayRow({
             top: 10,
             dayLabel: dateInfo.firstDayLabel,
@@ -311,11 +385,7 @@ const SinglePeriodSleepAnalysis = () => {
               barEnd: CHART_RIGHT,
               marker: { cx: timeX(normalSleepTime), color: COLORS.normalSleep, textColor: COLORS.normalSleepText, Icon: Moon, label: normalSleepTime },
             },
-            actual: {
-              barStart: timeX(actualSleepTime),
-              barEnd: CHART_RIGHT,
-              marker: { cx: timeX(actualSleepTime), color: COLORS.actualSleep, textColor: COLORS.actualSleepText, Icon: Coffee, label: actualSleepTime },
-            },
+            ...actualRows.first,
           })}
           {/* 兩天之間的分隔線 */}
           <line x1="20" y1={10 + LAYOUT.rowHeight - 8} x2="860" y2={10 + LAYOUT.rowHeight - 8} stroke="#e5e7eb" strokeWidth="1" />
@@ -328,11 +398,7 @@ const SinglePeriodSleepAnalysis = () => {
               barEnd: timeX(normalWakeTime),
               marker: { cx: timeX(normalWakeTime), color: COLORS.normalWake, textColor: COLORS.normalWakeText, Icon: Sun, label: normalWakeTime },
             },
-            actual: {
-              barStart: CHART_LEFT,
-              barEnd: timeX(actualWakeTime),
-              marker: { cx: timeX(actualWakeTime), color: COLORS.actualWake, textColor: COLORS.actualWakeText, Icon: Coffee, label: actualWakeTime },
-            },
+            ...actualRows.second,
           })}
         </svg>
 
@@ -367,7 +433,7 @@ const SinglePeriodSleepAnalysis = () => {
       {/* 詳細分析 */}
       <div className="bg-white rounded-lg p-6 shadow-md mt-6">
         <h3 className="text-lg font-semibold mb-4 text-gray-800">
-          {dateInfo.firstDayLabel}→{dateInfo.secondDayLabel} 睡眠分析
+          {dateInfo.periodLabel} 睡眠分析
         </h3>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
           {[sleepCard, wakeCard].map((card) => (
@@ -378,24 +444,27 @@ const SinglePeriodSleepAnalysis = () => {
           ))}
           <div className="bg-green-50 p-3 rounded">
             <p className="font-medium text-green-700">實際睡眠</p>
-            <p className="text-green-600">{formatDuration(actualSleepDuration)}</p>
+            <p className="text-green-600">{actualInvalid ? '—' : formatDuration(actualSleepDuration)}</p>
           </div>
           <div className="bg-blue-50 p-3 rounded">
             <p className="font-medium text-blue-700">正常睡眠</p>
             <p className="text-blue-600">{formatDuration(normalSleepDuration)}</p>
           </div>
         </div>
-        <div className="mt-4 text-sm text-gray-600">
-          <p>
-            <span className="font-medium">睡眠差異:</span>{' '}
-            {durationDiff === 0
-              ? '與正常相同'
-              : `${durationDiff > 0 ? '多睡' : '少睡'}${formatDuration(durationDiff)}`}
-          </p>
-          <p>
-            <span className="font-medium">建議:</span> {suggestionText}
-          </p>
-        </div>
+        {/* 今天→今天時間設定有誤時，不顯示差異與建議 */}
+        {!actualInvalid && (
+          <div className="mt-4 text-sm text-gray-600">
+            <p>
+              <span className="font-medium">睡眠差異:</span>{' '}
+              {durationDiff === 0
+                ? '與正常相同'
+                : `${durationDiff > 0 ? '多睡' : '少睡'}${formatDuration(durationDiff)}`}
+            </p>
+            <p>
+              <span className="font-medium">建議:</span> {suggestionText}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

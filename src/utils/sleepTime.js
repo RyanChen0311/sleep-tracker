@@ -71,3 +71,15 @@ export const suggestNextNight = (normalSleep, normalWake, actualSleep, actualWak
     reachesNormal: sleep === normalSleep && wake === normalWake,
   };
 };
+
+// ---- 今天→今天（凌晨入睡）----
+// 實際入睡與起床都在第 2 天（今天）；正常作息仍是第 1 天入睡 → 第 2 天起床。
+
+// 起床必須晚於入睡，相等（0 小時）也視為錯誤
+export const isValidSameDay = (sleepTime, wakeTime) => timeToMinutes(wakeTime) > timeToMinutes(sleepTime);
+
+export const sameDaySleepDuration = (sleepTime, wakeTime) => timeToMinutes(wakeTime) - timeToMinutes(sleepTime);
+
+// 正常入睡在第 1 天、實際入睡在第 2 天；正值 = 晚睡
+export const sameDaySleepDiff = (normalSleepTime, actualSleepTime) =>
+  MINUTES_PER_DAY + timeToMinutes(actualSleepTime) - timeToMinutes(normalSleepTime);

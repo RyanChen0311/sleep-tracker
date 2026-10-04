@@ -85,3 +85,24 @@ test('下一晚建議：每天最多調 1 小時，往正常作息靠近', async
     }
   }
 });
+
+test('今天→今天：576 種整點組合', async () => {
+  const { isValidSameDay, sameDaySleepDuration, sameDaySleepDiff } = await import('../src/utils/sleepTime.js');
+  for (let s = 0; s < 24; s++) {
+    for (let w = 0; w < 24; w++) {
+      const S = hh(s), W = hh(w);
+      // 起床早於或等於入睡時要提醒
+      assert.equal(isValidSameDay(S, W), w > s, `${S}->${W}`);
+      if (w > s) {
+        // 長條在同一列從入睡畫到起床，長度 = 時長
+        assert.equal(sameDaySleepDuration(S, W), (w - s) * 60);
+      }
+      // 正常 23:00 在昨天，實際入睡在今天
+      assert.equal(sameDaySleepDiff('23:00', S), (24 + s - 23) * 60);
+    }
+  }
+  assert.equal(sameDaySleepDiff('23:00', '02:00'), 180);
+  assert.equal(isValidSameDay('03:00', '03:00'), false);
+  assert.equal(isValidSameDay('10:00', '02:00'), false);
+  assert.equal(sameDaySleepDuration('02:00', '10:00'), 480);
+});
